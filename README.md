@@ -1,5 +1,7 @@
 # ExReg
 
+[![Build Status](https://travis-ci.org/gmtprime/exreg.svg?branch=master)](https://travis-ci.org/gmtprime/exreg) [![Hex pm](http://img.shields.io/hexpm/v/exreg.svg?style=flat)](https://hex.pm/packages/exreg) [![hex.pm downloads](https://img.shields.io/hexpm/dt/exreg.svg?style=flat)](https://hex.pm/packages/exreg) [![Deps Status](https://beta.hexfaktor.org/badge/all/github/gmtprime/exreg.svg)](https://beta.hexfaktor.org/github/gmtprime/exreg) [![Inline docs](http://inch-ci.org/github/gmtprime/exreg.svg?branch=master)](http://inch-ci.org/github/gmtprime/exreg)
+
 A simple process name registry using `:pg2`. Uses `:pg2` (running by default
 when starting the EVM) to associate a name (any Elixir term) to a process.
 
@@ -46,7 +48,7 @@ Add `ExReg` to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
-  [{:exreg, "~> 0.0.1"}]
+  [{:exreg, "~> 0.0.2"}]
 end
 ```
 

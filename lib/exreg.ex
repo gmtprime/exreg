@@ -1,7 +1,5 @@
 defmodule ExReg do
   @moduledoc """
-  # ExReg
-
   A simple process name registry using `:pg2`. Uses `:pg2` (running by default
   when starting the EVM) to associate a name (any Elixir term) to a process.
 
