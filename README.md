@@ -48,7 +48,7 @@ Add `ExReg` to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
-  [{:exreg, "~> 0.0.2"}]
+  [{:exreg, "~> 0.0.3"}]
 end
 ```
 
