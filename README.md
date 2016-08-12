@@ -35,7 +35,7 @@ And using `ExReg` as name registry:
 
 ```elixir
 iex(1)> name = {:name, make_ref()}
-iex(2)> Server.start_link({:via, ExReg, name})
+iex(2)> Server.start_link(name: {:via, ExReg, name})
 iex(3)> Server.ping({:via, ExReg, name})
 :pong
 iex(4)> Server.stop({:via, ExReg, name})
