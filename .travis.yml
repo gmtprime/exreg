@@ -1,18 +1,11 @@
 language: elixir
 elixir:
-  - 1.2.6
-  - 1.3.1
+  - 1.8.0
 otp_release:
-  - 18.0
-  - 18.1
-  - 18.2
-  - 19.0
+  - 21.2.3
 before_script:
   - MIX_ENV=test mix deps.get
   - MIX_ENV=test mix deps.compile
-script:
   - MIX_ENV=test mix compile
+script:
   - MIX_ENV=test mix test
-after_script:
-  - MIX_ENV=docs mix deps.get
-  - MIX_ENV=docs mix inch.report

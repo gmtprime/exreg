@@ -1,91 +1,137 @@
 defmodule ExRegTest do
   use ExUnit.Case, async: true
 
-  defmodule TestServer do
-    use GenServer
+  setup do
+    name = {:foo, make_ref()}
 
-    defp via_tuple(name) do
-      {:via, ExReg, name}
-    end
+    {:ok, [name: name]}
+  end
 
-    def start_link(name) do
-      GenServer.start_link(__MODULE__, nil, [name: via_tuple(name)])
-    end
-
-    def stop(name) do
-      GenServer.stop(via_tuple(name))
-    end
-
-    def ping(name) do
-      GenServer.call(via_tuple(name), :ping)
-    end
-
-    def handle_call(:ping, _from, _) do
-      {:reply, {:pong, self()}, nil}
+  describe "local/1" do
+    test "returns local via tuple", %{name: name} do
+      assert {:via, ExReg, {:local, ^name}} = ExReg.local(name)
     end
   end
 
-  test "register_name/2 - unregister_name/1" do
-    ref = make_ref()
-    name = {:name, ref}
-    real_name = {:"$exreg", name}
-    pid = self()
-    assert :yes = ExReg.register_name(name, pid)
-    assert [^pid] = :pg2.get_members(real_name)
-    ExReg.unregister_name(name)
-    assert {:error, {:no_such_group, ^real_name}} = :pg2.get_members(real_name)
+  describe "global/1" do
+    test "returns global via tuple", %{name: name} do
+      assert {:via, ExReg, {:global, ^name}} = ExReg.global(name)
+    end
   end
 
-  test "register_name/2 twice" do
-    ref = make_ref()
-    name = {:name, ref}
-    real_name = {:"$exreg", name}
-    pid = self()
-    assert :yes = ExReg.register_name(name, pid)
-    assert :yes = ExReg.register_name(name, pid)
-    assert [^pid] = :pg2.get_members(real_name)
-    ExReg.unregister_name(name)
-    assert {:error, {:no_such_group, ^real_name}} = :pg2.get_members(real_name)
+  describe "register_name/2" do
+    test "registers a new name", %{name: name} do
+      pid = self()
+
+      assert :yes = ExReg.register_name(name, pid)
+      assert [^pid] = :pg2.get_members({:"$exreg", name})
+    end
+
+    test "registers a name if the group already exists", %{name: name} do
+      pid = self()
+
+      assert :yes = ExReg.register_name(name, spawn(fn -> :ok end))
+      assert [] = :pg2.get_members({:"$exreg", name})
+      assert :yes = ExReg.register_name(name, pid)
+      assert [^pid] = :pg2.get_members({:"$exreg", name})
+    end
+
+    test "does not register the same name twice", %{name: name} do
+      pid = self()
+
+      assert :yes = ExReg.register_name(name, pid)
+      assert :yes = ExReg.register_name(name, pid)
+      assert [^pid] = :pg2.get_members({:"$exreg", name})
+    end
+
+    test "avoids naming two processes the same", %{name: name} do
+      pid = self()
+
+      assert :yes = ExReg.register_name(name, pid)
+      assert :no = ExReg.register_name(name, spawn(fn -> :ok end))
+    end
   end
 
-  test "register_name/2 two processes" do
-    ref = make_ref()
-    name = {:name, ref}
-    real_name = {:"$exreg", name}
-    pid = self()
-    other = spawn(fn -> :ok end)
-    assert :yes = ExReg.register_name(name, pid)
-    assert :no = ExReg.register_name(name, other)
-    assert [^pid] = :pg2.get_members(real_name)
-    ExReg.unregister_name(name)
-    assert {:error, {:no_such_group, ^real_name}} = :pg2.get_members(real_name)
+  describe "unregister_name/1" do
+    test "unregisters an existent name", %{name: name} do
+      pid = self()
+
+      assert :yes = ExReg.register_name(name, pid)
+      assert :ok = ExReg.unregister_name(name)
+      assert {:error, _} = :pg2.get_members({:"$exreg", name})
+    end
+
+    test "unregisters name when is empty", %{name: name} do
+      assert :yes = ExReg.register_name(name, spawn(fn -> :ok end))
+      assert [] = :pg2.get_members({:"$exreg", name})
+      assert :ok = ExReg.unregister_name(name)
+      assert {:error, _} = :pg2.get_members({:"$exreg", name})
+    end
+
+    test "does nothing when the name does not exist", %{name: name} do
+      assert :ok = ExReg.unregister_name(name)
+    end
   end
 
-  test "whereis_name/1" do
-    ref = make_ref()
-    name = {:name, ref}
-    pid = self()
-    assert :yes = ExReg.register_name(name, pid)
-    assert ^pid = ExReg.whereis_name(name)
-    ExReg.unregister_name(name)
-    assert :undefined = ExReg.whereis_name(name)
+  describe "whereis_name/1" do
+    test "looks for local processes", %{name: name} do
+      pid = self()
+
+      assert :yes = ExReg.register_name(name, pid)
+      assert ^pid = ExReg.whereis_name({:local, name})
+    end
+
+    test "looks for global processes", %{name: name} do
+      pid = self()
+
+      assert :yes = ExReg.register_name(name, pid)
+      assert ^pid = ExReg.whereis_name({:global, name})
+    end
   end
 
-  test "send/2" do
-    ref = make_ref()
-    name = {:name, ref}
-    pid = self()
-    assert :yes = ExReg.register_name(name, pid)
-    assert ^pid = ExReg.send(name, :message)
-    assert_receive :message
-    ExReg.unregister_name(name)
+  describe "send/2" do
+    test "sends messages to local processes", %{name: name} do
+      pid = self()
+
+      assert :yes = ExReg.register_name(name, pid)
+      assert ^pid = ExReg.send({:local, name}, "bar")
+      assert_receive "bar"
+    end
+
+    test "sends messages to global processes", %{name: name} do
+      pid = self()
+
+      assert :yes = ExReg.register_name(name, pid)
+      assert ^pid = ExReg.send({:local, name}, "bar")
+      assert_receive "bar"
+    end
   end
 
-  test "GenServer test" do
-    ref = make_ref()
-    name = {:name, ref}
-    {:ok, client} = TestServer.start_link(name)
-    assert {:pong, ^client} = TestServer.ping(name)
-    TestServer.stop(name)
+  describe "via tuples" do
+    defmodule Counter do
+      use Agent
+
+      def start_link(options \\ []) do
+        Agent.start_link(fn -> 0 end, options)
+      end
+
+      def stop(counter) do
+        Agent.stop(counter)
+      end
+
+      def increment(counter) do
+        Agent.get_and_update(counter, &{&1 + 1, &1 + 1})
+      end
+    end
+
+    test "registers name", %{name: name} do
+      assert {:ok, pid} = Counter.start_link(name: ExReg.local(name))
+      assert [^pid] = :pg2.get_members({:"$exreg", name})
+    end
+
+    test "sends message to name", %{name: name} do
+      assert {:ok, pid} = Counter.start_link(name: ExReg.local(name))
+      assert 1 = Counter.increment(ExReg.global(name))
+    end
   end
 end

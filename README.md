@@ -1,46 +1,71 @@
 # ExReg
 
-[![Build Status](https://travis-ci.org/gmtprime/exreg.svg?branch=master)](https://travis-ci.org/gmtprime/exreg) [![Hex pm](http://img.shields.io/hexpm/v/exreg.svg?style=flat)](https://hex.pm/packages/exreg) [![hex.pm downloads](https://img.shields.io/hexpm/dt/exreg.svg?style=flat)](https://hex.pm/packages/exreg) [![Deps Status](https://beta.hexfaktor.org/badge/all/github/gmtprime/exreg.svg)](https://beta.hexfaktor.org/github/gmtprime/exreg) [![Inline docs](http://inch-ci.org/github/gmtprime/exreg.svg?branch=master)](http://inch-ci.org/github/gmtprime/exreg)
+[![Build Status](https://travis-ci.org/gmtprime/exreg.svg?branch=master)](https://travis-ci.org/gmtprime/exreg) [![Hex pm](http://img.shields.io/hexpm/v/exreg.svg?style=flat)](https://hex.pm/packages/exreg) [![hex.pm downloads](https://img.shields.io/hexpm/dt/exreg.svg?style=flat)](https://hex.pm/packages/exreg)
 
-A simple process name registry using `:pg2`. Uses `:pg2` (running by default
-when starting the EVM) to associate a name (any Elixir term) to a process.
+A simple process name registry using `:pg2`:
 
-## Example
+- Depends on the built-in Erlang's `:pg2` app (running by default when starting
+  the EVM).
+- Can be used with `:via` tuples for naming `GenServers`, `Agents`, etc.
+- Accepts any valid erlang term as process names.
+- Supports several processses with the same name as long as they are not in the
+  same node. Always picks the node closest to the process that called the
+  function.
 
-Defining a simple ping-pong server:
+## Small example
+
+Let's say we define the following `Agent` for keeping a counter:
 
 ```elixir
-defmodule Server do
-  use GenServer
+defmodule Counter do
+  use Agent
 
-  def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, nil, opts)
+  def start_link(options \\ []) do
+    Agent.start_link(fn -> 0 end, options)
   end
 
-  def stop(name, reason \\ :normal) do
-    GenServer.stop(name, reason)
-  end
-
-  def ping(name) do
-    GenServer.call(name, :ping)
-  end
-
-  def handle_call(:ping, _from, _) do
-    {:reply, :pong, nil}
+  def increment(counter) do
+    Agent.get_and_update(counter, &{&1, &1 + 1})
   end
 end
 ```
 
-And using `ExReg` as name registry:
+We can now start it using `ExReg` as name registry:
 
 ```elixir
-iex(1)> name = {:name, make_ref()}
-iex(2)> Server.start_link(name: {:via, ExReg, name})
-iex(3)> Server.ping({:via, ExReg, name})
-:pong
-iex(4)> Server.stop({:via, ExReg, name})
-:ok
+iex(1)> name = {:via, ExReg, {"metric", :my_counter}}
+iex(2)> Counter.start_link(name: name)
+{:ok, #PID<0.42.0>}
+iex(3)> Counter.increment(name)
+1
+iex(4)> Counter.increment(name)
+2
 ```
+
+# Distributed systems
+
+In a distributed environment, there are several things to notice:
+
+- `ExReg` allows several processes to share the same name as long as they are
+  not in the same Erlang node.
+- When starting processes a process locally or sending messages exclusively
+  to a local process:
+
+  * The name should match the type `{:local, term()}` e.g:
+    ```
+    Counter.start_link({:via, ExReg, {:local, {"metric", :my_counter}}})
+    ```
+  * The function `ExReg.local({"metric", :my_counter})` can also be used to
+    generate the local via tuple.
+
+- When sending messages to a named process, no matter its location:
+
+  * The name should be the term itself or `{:global, term()}` e.g:
+    ```
+    Counter.increment({:via, ExReg, {"metric", :my_counter}})
+    ```
+  * The function `ExReg.global({"metric", :my_counter})` can also be used to
+    generate the global via tuple.
 
 ## Installation
 
@@ -48,7 +73,7 @@ Add `ExReg` to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
-  [{:exreg, "~> 0.0.3"}]
+  [{:exreg, "~> 0.1.0"}]
 end
 ```
 

@@ -1,62 +1,74 @@
 defmodule ExReg do
   @moduledoc """
-  A simple process name registry using `:pg2`. Uses `:pg2` (running by default
-  when starting the EVM) to associate a name (any Elixir term) to a process.
+  This module defines the API for a simple and distributed process name
+  registry, using `:pg2`. The following features are supported:
 
-  ## Example
+  - Accepts any term as process names.
+  - Works distributedly.
+  - Supports registering processes with the same name as long as they are in
+    different nodes.
 
-  A simple ping-pong server:
-
-      defmodule Server do
-        use GenServer
-
-        def start_link(opts \\ []) do
-          GenServer.start_link(__MODULE__, nil, opts)
-        end
-
-        def stop(name, reason \\ :normal) do
-          GenServer.stop(name, reason)
-        end
-
-        def ping(name) do
-          GenServer.call(name, :ping)
-        end
-
-        def handle_call(:ping, _from, _) do
-          {:reply, :pong, nil}
-        end
-      end
-
-  And using `ExReg` as name registry:
-
-      iex(1)> name = {:name, make_ref()}
-      iex(2)> {:ok, pid} = Server.start_link(name: {:via, ExReg, name})
-      iex(3)> Server.ping({:via, ExReg, name})
-      :pong
-      iex(4)> Server.stop({:via, ExReg, name})
-      :ok
+  ```
+  iex>pid = self()
+  #PID<0.42.0>
+  iex> ExReg.register_name(:foo, pid)
+  :yes
+  iex> ExReg.whereis_name(:foo)
+  #PID<0.42.0>
+  iex> ExReg.send(:foo, "bar")
+  iex> flush()
+  "bar"
+  :ok
+  iex> ExReg.unregister_name(:foo)
+  :ok
+  iex> ExReg.send(:foo, "hey")
+  ** (ArgumentError) Cannot send "hey" to :foo
+  ```
   """
 
-  ##
-  # Gets the real process name.
-  defp get_real_name(name), do: {:"$exreg", name}
+  @typedoc """
+  Location.
+  """
+  @type location :: :local | :global
+
+  @typedoc """
+  Process name.
+  """
+  @type process_name :: term() | {location(), term()}
+
+  ############
+  # Public API
 
   @doc """
-  Registers the process `pid` with the term `name`.
+  Generates a `:via` tuple for a global `name`.
   """
-  @spec register_name(name :: term, pid :: pid) :: :yes | :no
+  @spec global(term()) :: {:via, __MODULE__, process_name()}
+  def global(name), do: via(name, :global)
+
+  @doc """
+  Generates a `:via` tuple for a local `name`.
+  """
+  @spec local(term()) :: {:via, __MODULE__, process_name()}
+  def local(name), do: via(name, :local)
+
+  @doc """
+  Registers `name` as an alias for a local `pid` globally.
+  """
+  @spec register_name(process_name(), pid()) :: :yes | :no
   def register_name(name, pid) do
-    real_name = get_real_name(name)
-    :pg2.create(real_name)
-    case :pg2.get_members(real_name) do
-      {:error, {:no_such_group, ^real_name}} ->
-        :pg2.join(real_name, pid)
+    case get_local_pid(name) do
+      {:error, {:no_such_group, internal_name}} ->
+        :pg2.create(internal_name)
+        :pg2.join(internal_name, pid)
         :yes
-      [] ->
-        :pg2.join(real_name, pid)
+
+      {:error, {:no_process, internal_name}} ->
+        :pg2.join(internal_name, pid)
         :yes
-      [^pid] ->
+
+      ^pid ->
         :yes
+
       _ ->
         :no
     end
@@ -65,36 +77,123 @@ defmodule ExReg do
   @doc """
   Unregisters a `name`.
   """
-  @spec unregister_name(name :: term) :: term
+  @spec unregister_name(process_name()) :: :ok
   def unregister_name(name) do
-    real_name = get_real_name(name)
-    :pg2.delete(real_name)
+    pid = self()
+    internal_name = get_internal_name(name)
+
+    case :pg2.get_members(internal_name) do
+      [] ->
+        :pg2.delete(internal_name)
+
+      [^pid] ->
+        :pg2.delete(internal_name)
+
+      _ ->
+        :ok
+    end
   end
 
   @doc """
   Searches for the PID associated with the `name`.
   """
-  @spec whereis_name(name :: term) :: pid | :undefined
-  def whereis_name(name) do
-    real_name = get_real_name(name)
-    case :pg2.get_members(real_name) do
-      {:error, _} -> :undefined
-      [] -> :undefined
-      [pid | _] -> pid
+  @spec whereis_name(process_name()) :: pid() | :undefined
+  def whereis_name(name)
+
+  def whereis_name({:global, _} = name) do
+    case get_closest_pid(name) do
+      pid when is_pid(pid) -> pid
+      _ -> :undefined
     end
+  end
+
+  def whereis_name({:local, _} = name) do
+    case get_local_pid(name) do
+      pid when is_pid(pid) -> pid
+      _ -> :undefined
+    end
+  end
+
+  def whereis_name(name) do
+    whereis_name({:global, name})
   end
 
   @doc """
   Sends a `message` to the PID associated with `name`.
   """
-  @spec send(name :: term, message :: term) :: pid
+  @spec send(process_name(), term()) :: pid() | no_return()
   def send(name, message) do
     case whereis_name(name) do
-      :undefined ->
-        exit({:badarg, {name, message}})
-      pid ->
+      pid when is_pid(pid) ->
         Kernel.send(pid, message)
         pid
+
+      :undefined ->
+        raise ArgumentError,
+          message: "Cannot send #{inspect(message)} to #{inspect(name)}"
+    end
+  end
+
+  #########
+  # Helpers
+
+  # Generates a `:via` tuple given a valid `name` and, optionally, a `location`
+  # (defaults to `:global`).
+  @spec via(term(), location()) :: {:via, __MODULE__, process_name()}
+  defp via(name, location)
+
+  defp via(name, location) when location in [:local, :global] do
+    {:via, __MODULE__, {location, name}}
+  end
+
+  # Gets the internal process name.
+  @spec get_internal_name(process_name()) :: {:"$exreg", term()}
+  defp get_internal_name(name)
+
+  defp get_internal_name({:local, name}) do
+    get_internal_name(name)
+  end
+
+  defp get_internal_name({:global, name}) do
+    get_internal_name(name)
+  end
+
+  defp get_internal_name(name) do
+    {:"$exreg", name}
+  end
+
+  # Gets the closest PID given a process `name`.
+  @spec get_closest_pid(process_name()) ::
+          pid()
+          | {:error, {:no_process, term()}}
+          | {:error, {:no_such_group, term()}}
+  defp get_closest_pid(name)
+
+  defp get_closest_pid(name) do
+    name
+    |> get_internal_name()
+    |> :pg2.get_closest_pid()
+  end
+
+  # Gets the local PID for the given process `name`.
+  @spec get_local_pid(process_name()) ::
+          pid()
+          | {:error, {:no_process, term()}}
+          | {:error, {:no_such_group, term()}}
+  defp get_local_pid(name)
+
+  defp get_local_pid(name) do
+    internal_name = get_internal_name(name)
+
+    case :pg2.get_local_members(internal_name) do
+      [pid | _] when is_pid(pid) ->
+        pid
+
+      [] ->
+        {:error, {:no_process, internal_name}}
+
+      error ->
+        error
     end
   end
 end
