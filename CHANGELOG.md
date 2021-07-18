@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.0
+
+### Enhancements
+
+  * Updated dependencies.
+  * Replaces `:pg2` with `:pg` so it works with OTP 24.
+  * Uses a scoped `:pg` process to avoid clashing with other `:pg` uses.
+
 ## v0.1.0
 
 ### Enhancements

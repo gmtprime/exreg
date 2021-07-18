@@ -1,7 +1,7 @@
 defmodule ExReg do
   @moduledoc """
   This module defines the API for a simple and distributed process name
-  registry, using `:pg2`. The following features are supported:
+  registry, using `:pg`. The following features are supported:
 
   - Accepts any term as process names.
   - Works distributedly.
@@ -25,6 +25,17 @@ defmodule ExReg do
   ** (ArgumentError) Cannot send "hey" to :foo
   ```
   """
+  use Application
+
+  @impl true
+  def start(_type, _args) do
+    children = [%{id: __MODULE__, start: {:pg, :start_link, [__MODULE__]}}]
+
+    Supervisor.start_link(children,
+      strategy: :one_for_one,
+      name: ExReg.Supervisor
+    )
+  end
 
   @typedoc """
   Location.
@@ -57,16 +68,11 @@ defmodule ExReg do
   @spec register_name(process_name(), pid()) :: :yes | :no
   def register_name(name, pid) do
     case get_local_pid(name) do
-      {:error, {:no_such_group, internal_name}} ->
-        :pg2.create(internal_name)
-        :pg2.join(internal_name, pid)
-        :yes
-
       {:error, {:no_process, internal_name}} ->
-        :pg2.join(internal_name, pid)
+        :pg.join(__MODULE__, internal_name, pid)
         :yes
 
-      ^pid ->
+      {:ok, ^pid} ->
         :yes
 
       _ ->
@@ -82,13 +88,10 @@ defmodule ExReg do
     pid = self()
     internal_name = get_internal_name(name)
 
-    case :pg2.get_members(internal_name) do
-      [] ->
-        :pg2.delete(internal_name)
-
-      [^pid] ->
-        :pg2.delete(internal_name)
-
+    with [_ | _] = pids <- :pg.get_members(__MODULE__, internal_name),
+         true <- pid in pids do
+      :pg.leave(__MODULE__, internal_name, pids)
+    else
       _ ->
         :ok
     end
@@ -102,15 +105,21 @@ defmodule ExReg do
 
   def whereis_name({:global, _} = name) do
     case get_closest_pid(name) do
-      pid when is_pid(pid) -> pid
-      _ -> :undefined
+      {:ok, pid} when is_pid(pid) ->
+        pid
+
+      {:error, {:no_process, _}} ->
+        :undefined
     end
   end
 
   def whereis_name({:local, _} = name) do
     case get_local_pid(name) do
-      pid when is_pid(pid) -> pid
-      _ -> :undefined
+      {:ok, pid} when is_pid(pid) ->
+        pid
+
+      {:error, {:no_process, _}} ->
+        :undefined
     end
   end
 
@@ -164,36 +173,49 @@ defmodule ExReg do
 
   # Gets the closest PID given a process `name`.
   @spec get_closest_pid(process_name()) ::
-          pid()
+          {:ok, pid()}
           | {:error, {:no_process, term()}}
-          | {:error, {:no_such_group, term()}}
   defp get_closest_pid(name)
 
   defp get_closest_pid(name) do
-    name
-    |> get_internal_name()
-    |> :pg2.get_closest_pid()
+    with {:error, {:no_process, _}} <- get_local_pid(name) do
+      get_pid(name)
+    end
   end
 
   # Gets the local PID for the given process `name`.
   @spec get_local_pid(process_name()) ::
-          pid()
+          {:ok, pid()}
           | {:error, {:no_process, term()}}
-          | {:error, {:no_such_group, term()}}
   defp get_local_pid(name)
 
   defp get_local_pid(name) do
     internal_name = get_internal_name(name)
 
-    case :pg2.get_local_members(internal_name) do
-      [pid | _] when is_pid(pid) ->
-        pid
-
+    case :pg.get_local_members(__MODULE__, internal_name) do
       [] ->
         {:error, {:no_process, internal_name}}
 
-      error ->
-        error
+      [pid | _] when is_pid(pid) ->
+        {:ok, pid}
+    end
+  end
+
+  # Gets all PID for the given `name`.
+  @spec get_pid(process_name()) ::
+          {:ok, pid()}
+          | {:error, {:no_process, term()}}
+  defp get_pid(name)
+
+  defp get_pid(name) do
+    internal_name = get_internal_name(name)
+
+    case :pg.get_members(__MODULE__, internal_name) do
+      [] ->
+        {:error, {:no_process, internal_name}}
+
+      [pid | _] when is_pid(pid) ->
+        {:ok, pid}
     end
   end
 end
