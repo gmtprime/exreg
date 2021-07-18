@@ -38,7 +38,9 @@ defmodule ExReg.Mixfile do
   end
 
   def dialyzer do
-    [ptl_file: {:no_warn, "priv/plts/exreg"}]
+    [
+      plt_file: {:no_warn, "priv/plts/exreg.plt"}
+    ]
   end
 
   #########
