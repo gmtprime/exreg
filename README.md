@@ -2,10 +2,9 @@
 
 [![Build Status](https://travis-ci.org/gmtprime/exreg.svg?branch=master)](https://travis-ci.org/gmtprime/exreg) [![Hex pm](http://img.shields.io/hexpm/v/exreg.svg?style=flat)](https://hex.pm/packages/exreg) [![hex.pm downloads](https://img.shields.io/hexpm/dt/exreg.svg?style=flat)](https://hex.pm/packages/exreg)
 
-A simple process name registry using `:pg2`:
+A simple process name registry using `:pg`:
 
-- Depends on the built-in Erlang's `:pg2` app (running by default when starting
-  the EVM).
+- Depends on the built-in Erlang's `:pg` app
 - Can be used with `:via` tuples for naming `GenServers`, `Agents`, etc.
 - Accepts any valid erlang term as process names.
 - Supports several processses with the same name as long as they are not in the
@@ -73,9 +72,11 @@ Add `ExReg` to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
-  [{:exreg, "~> 0.1.0"}]
+  [{:exreg, "~> 1.0"}]
 end
 ```
+
+> Requires OTP 24 or more.
 
 ## Author
 
